@@ -10,12 +10,15 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
 - Integration with Google's Gemini AI
 - Support for multiple Gemini models with automatic location mapping
 - Type-safe implementation with TypeScript
+- Chat session management
+- Ngrok integration for public access
 
 ## Prerequisites
 
 - Node.js (v14 or higher)
 - npm (v6 or higher)
 - Google Cloud project with Gemini API enabled
+- Docker and Docker Compose (optional)
 
 ## Installation
 
@@ -34,49 +37,31 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
    npm run build
    ```
 
-## Usage
+## Docker Deployment
 
-1. Start the server:
-   ```
-   npm start
-   ```
-
-2. For development with auto-reload:
-   ```
-   npm run dev:watch
+1. Build and start the containers:
+   ```bash
+   docker-compose up -d
    ```
 
-3. Make a request to the API endpoint:
-   ```
-   curl -X POST \
-     http://localhost:3000/api/generate \
-     -H 'x-api-key: your_api_key_here' \
-     -F 'pdf=@/path/to/your/file.pdf' \
-     -F 'prompt=Your prompt here' \
-     -F 'preprompt=Optional system instruction' \
-     -F 'model=gemini-2.0-flash-001'
-   ```
+2. Access the API through:
+   - Local: http://localhost:3000
+   - Ngrok: https://your-domain.ngrok-free.app (if configured)
 
-4. List available models:
-   ```
-   curl -X GET \
-     http://localhost:3000/api/models \
-     -H 'x-api-key: your_api_key_here'
-   ```
-
-5. Use the test script:
-   ```
-   # Run with default model
-   npx ts-node test-api.ts /path/to/your/file.pdf "Your prompt here"
-
-   # Run with specific model
-   npx ts-node test-api.ts /path/to/your/file.pdf "Your prompt here" gemini-2.0-flash-001
-
-   # List available models
-   npx ts-node test-api.ts --list-models
+3. Monitor ngrok status:
+   ```bash
+   # View ngrok web interface
+   open http://localhost:4040
+   
+   # Check ngrok logs
+   docker-compose logs -f ngrok
    ```
 
 ## API Documentation
+
+### Authentication
+
+All endpoints require the `x-api-key` header with your API key.
 
 ### Generate Content
 
@@ -86,22 +71,15 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
 - `x-api-key`: Your API key (required)
 
 **Form Data:**
-- `pdf`: PDF file (required)
+- `pdf`: PDF file (required, max 10MB)
 - `prompt`: Text prompt for Gemini (required)
 - `preprompt`: System instruction (optional)
-- `model`: Gemini model to use (optional, defaults to the value in .env)
+- `model`: Gemini model to use (optional, defaults to .env value)
 
 **Response:**
 ```json
 {
   "result": "Generated content from Gemini..."
-}
-```
-
-**Error Response:**
-```json
-{
-  "error": "Error message"
 }
 ```
 
@@ -117,6 +95,10 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
 {
   "models": [
     {
+      "model": "gemini-2.5-pro-preview-03-25",
+      "location": "global"
+    },
+    {
       "model": "gemini-2.0-flash-001",
       "location": "global"
     },
@@ -125,21 +107,128 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
       "location": "global"
     },
     {
+      "model": "gemini-2.0-flash-thinking-exp-01-21",
+      "location": "global"
+    },
+    {
       "model": "gemini-1.5-flash-002",
       "location": "asia-southeast1"
+    },
+    {
+      "model": "gemini-1.5-pro-002",
+      "location": "global"
     }
   ]
 }
 ```
 
+### Chat Sessions
+
+#### Create Chat Session
+
+**Endpoint:** `POST /api/chat/session`
+
+**Headers:**
+- `x-api-key`: Your API key (required)
+
+**Body:**
+```json
+{
+  "model": "gemini-2.0-flash-001",  // optional
+  "preprompt": "System instruction"  // optional
+}
+```
+
+**Response:**
+```json
+{
+  "sessionId": "unique-session-id",
+  "model": "gemini-2.0-flash-001",
+  "created": "2024-03-20T10:00:00Z"
+}
+```
+
+#### Get Chat Session
+
+**Endpoint:** `GET /api/chat/:sessionId`
+
+**Headers:**
+- `x-api-key`: Your API key (required)
+
+**Response:**
+```json
+{
+  "sessionId": "unique-session-id",
+  "model": "gemini-2.0-flash-001",
+  "created": "2024-03-20T10:00:00Z",
+  "messages": []
+}
+```
+
+#### List Chat Sessions
+
+**Endpoint:** `GET /api/chat`
+
+**Headers:**
+- `x-api-key`: Your API key (required)
+
+**Response:**
+```json
+[
+  {
+    "sessionId": "session-1",
+    "model": "gemini-2.0-flash-001",
+    "created": "2024-03-20T10:00:00Z"
+  },
+  // ...
+]
+```
+
+#### Delete All Chat Sessions
+
+**Endpoint:** `DELETE /api/chat`
+
+**Headers:**
+- `x-api-key`: Your API key (required)
+
+**Response:**
+```json
+{
+  "message": "Deleted X chat sessions"
+}
+```
+
 ## Environment Variables
 
-- `PORT`: Server port (default: 3000)
-- `API_KEY`: API key for authentication
-- `GOOGLE_API_KEY`: Google API key for Gemini
-- `GOOGLE_PROJECT_ID`: Google Cloud project ID
-- `DEFAULT_GEMINI_MODEL`: Default Gemini model to use when none is specified
+```env
+# Server configuration
+PORT=3000
+NGROK_AUTHTOKEN=your_ngrok_authtoken
+
+# API authentication
+API_KEY=your_api_key
+
+# Google Gemini configuration
+GOOGLE_API_KEY=your_google_api_key
+GOOGLE_PROJECT_ID=your_google_project_id
+
+# Default model configuration
+DEFAULT_GEMINI_MODEL=gemini-2.0-flash-lite-001
+
+# Optional system preprompt
+DEFAULT_PREPROMPT=your_default_system_instruction
+```
+
+## Available Models
+
+- `gemini-2.5-pro-preview-03-25` (Location: global)
+- `gemini-2.0-flash-001` (Location: global)
+- `gemini-2.0-flash-lite-001` (Location: global)
+- `gemini-2.0-flash-thinking-exp-01-21` (Location: global)
+- `gemini-1.5-flash-002` (Location: asia-southeast1)
+- `gemini-1.5-pro-002` (Location: global)
 
 ## License
 
 ISC
+

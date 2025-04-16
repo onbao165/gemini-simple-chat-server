@@ -16,7 +16,7 @@ services:
     container_name: gemini-api-ngrok
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-    command: http app:3000
+    command: http --domain=${NGROK_DOMAIN} app:3000
     ports:
       - "4040:4040"
     depends_on:
