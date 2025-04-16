@@ -56,6 +56,20 @@ const upload = multer({
   }
 });
 
+// Add new helper function to list files
+const getUploadedFiles = () => {
+  const uploadDir = path.join(__dirname, '../uploads');
+  if (!fs.existsSync(uploadDir)) {
+    return [];
+  }
+  return fs.readdirSync(uploadDir).map(filename => ({
+    filename,
+    path: path.join(uploadDir, filename),
+    size: fs.statSync(path.join(uploadDir, filename)).size,
+    uploadedAt: fs.statSync(path.join(uploadDir, filename)).mtime
+  }));
+};
+
 // API endpoint to get available models
 app.get('/api/models', (req: Request, res: Response) => {
   try {
@@ -67,14 +81,77 @@ app.get('/api/models', (req: Request, res: Response) => {
   }
 });
 
-// Body: { prompt: string, preprompt?: string, model?: string }
+// List uploaded files
+app.get('/api/files', (req: Request, res: Response) => {
+  try {
+    const files = getUploadedFiles();
+    res.json({ files });
+  } catch (error) {
+    console.error('Error listing files:', error);
+    res.status(500).json({ error: 'An error occurred while listing files' });
+  }
+});
+
+// Delete specific file
+app.delete('/api/files/:filename', (req: Request, res: Response) => {
+  try {
+    const { filename } = req.params;
+    const filepath = path.join(__dirname, '../uploads', filename);
+    
+    if (!fs.existsSync(filepath)) {
+      res.status(404).json({ error: 'File not found' });
+      return;
+    }
+
+    fs.unlinkSync(filepath);
+    res.json({ message: 'File deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    res.status(500).json({ error: 'An error occurred while deleting file' });
+  }
+});
+
+// Upload file endpoint
+app.post('/api/files', upload.single('file'), (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'No file uploaded' });
+      return;
+    }
+    
+    res.json({ 
+      filename: req.file.filename,
+      path: req.file.path,
+      size: req.file.size
+    });
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({ error: 'An error occurred while uploading file' });
+  }
+});
+
+// Body: { prompt: string, preprompt?: string, model?: string, filename?: string }
 // Files: { pdf: File } (required, max 10MB, PDF only)
 app.post('/api/generate', upload.single('pdf'), async (req: Request, res: Response) => {
   try {
-    const { prompt, preprompt = "", model } = req.body;
+    // Add type checking and default values
+    const prompt = req.body?.prompt;
+    const preprompt = req.body?.preprompt || "";
+    const model = req.body?.model;
+    const filename = req.body?.filename;
     
-    if (!req.file) {
-      res.status(400).json({ error: 'PDF file is required' });
+    let pdfPath: string | undefined;
+
+    if (req.file) {
+      pdfPath = req.file.path;
+    } else if (filename) {
+      pdfPath = path.join(__dirname, '../uploads', filename);
+      if (!fs.existsSync(pdfPath)) {
+        res.status(404).json({ error: 'File not found' });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: 'Either file upload or filename is required' });
       return;
     }
     
@@ -90,7 +167,6 @@ app.post('/api/generate', upload.single('pdf'), async (req: Request, res: Respon
       return;
     }
     
-    const pdfPath = req.file.path;
     const result = await generateContent({
       pdfPath,
       prompt,
@@ -98,7 +174,11 @@ app.post('/api/generate', upload.single('pdf'), async (req: Request, res: Respon
       modelType: model
     });
     
-    fs.unlinkSync(pdfPath);
+    // Only delete the file if it was uploaded in this request
+    if (req.file) {
+      fs.unlinkSync(pdfPath);
+    }
+    
     res.json({ result });
   } catch (error: any) {
     console.error('Error generating content:', error);
@@ -122,22 +202,41 @@ app.post('/api/chat/session', async (req: Request, res: Response) => {
   }
 });
 
-// Body: { message: string }
+// Body: { message: string, filename?: string }
 // Files: { pdf?: File } (optional, max 10MB, PDF only)
 // URL params: sessionId
 app.post('/api/chat/:sessionId/message', upload.single('pdf'), async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
-    const { message } = req.body;
+    const message = req.body?.message;
+    const filename = req.body?.filename;
     const ip = getClientIp(req);
     
+    let pdfPath: string | undefined;
+    
+    if (req.file) {
+      pdfPath = req.file.path;
+    } else if (filename) {
+      pdfPath = path.join(__dirname, '../uploads', filename);
+      if (!fs.existsSync(pdfPath)) {
+        res.status(404).json({ error: 'File not found' });
+        return;
+      }
+    }
+
     if (!message) {
       res.status(400).json({ error: 'Message is required' });
       return;
     }
 
     const chatManager = ChatManager.getInstance();
-    const result = await chatManager.sendMessage(sessionId, ip, message, req.file?.path);
+    const result = await chatManager.sendMessage(sessionId, ip, message, pdfPath);
+    
+    // Only delete the file if it was uploaded in this request
+    if (req.file && pdfPath) {
+      fs.unlinkSync(pdfPath);
+    }
+    
     res.json(result);
   } catch (error: any) {
     console.error('Error sending message:', error);
@@ -219,3 +318,5 @@ app.delete('/api/chat', async (req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+

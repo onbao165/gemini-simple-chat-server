@@ -63,23 +63,85 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
 
 All endpoints require the `x-api-key` header with your API key.
 
-### Generate Content
+### File Management
 
-**Endpoint:** `POST /api/generate`
+#### Upload File
+
+**Endpoint:** `POST /api/files`
 
 **Headers:**
 - `x-api-key`: Your API key (required)
 
 **Form Data:**
-- `pdf`: PDF file (required, max 10MB)
-- `prompt`: Text prompt for Gemini (required)
-- `preprompt`: System instruction (optional)
-- `model`: Gemini model to use (optional, defaults to .env value)
+- `file`: PDF file (required, max 10MB)
 
 **Response:**
 ```json
 {
-  "result": "Generated content from Gemini..."
+  "filename": "1234567890-document.pdf",
+  "path": "/app/uploads/1234567890-document.pdf",
+  "size": 1234567
+}
+```
+
+#### List Files
+
+**Endpoint:** `GET /api/files`
+
+**Headers:**
+- `x-api-key`: Your API key (required)
+
+**Response:**
+```json
+{
+  "files": [
+    {
+      "filename": "document1.pdf",
+      "path": "/app/uploads/document1.pdf",
+      "size": 1234567,
+      "uploadedAt": "2024-03-20T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### Delete File
+
+**Endpoint:** `DELETE /api/files/:filename`
+
+**Headers:**
+- `x-api-key`: Your API key (required)
+
+**Response:**
+```json
+{
+  "message": "File deleted successfully"
+}
+```
+
+### Generate Content
+
+Now supports two modes of operation:
+
+1. Direct file upload:
+```
+POST /api/generate
+Content-Type: multipart/form-data
+x-api-key: your-api-key
+
+file: <pdf_file>
+prompt: "your prompt"
+```
+
+2. Using previously uploaded file:
+```
+POST /api/generate
+Content-Type: application/json
+x-api-key: your-api-key
+
+{
+  "filename": "previously-uploaded.pdf",
+  "prompt": "your prompt"
 }
 ```
 
@@ -198,6 +260,32 @@ All endpoints require the `x-api-key` header with your API key.
 }
 ```
 
+### Chat Messages
+
+Similarly supports both direct upload and referencing existing files:
+
+1. Direct file upload:
+```
+POST /api/chat/:sessionId/message
+Content-Type: multipart/form-data
+x-api-key: your-api-key
+
+pdf: <pdf_file>
+message: "your message"
+```
+
+2. Using previously uploaded file:
+```
+POST /api/chat/:sessionId/message
+Content-Type: application/json
+x-api-key: your-api-key
+
+{
+  "filename": "previously-uploaded.pdf",
+  "message": "your message"
+}
+```
+
 ## Environment Variables
 
 ```env
@@ -231,4 +319,5 @@ DEFAULT_PREPROMPT=your_default_system_instruction
 ## License
 
 ISC
+
 
