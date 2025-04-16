@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: gemini-api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./.env:/app/.env
+    restart: always
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: gemini-api-ngrok
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http app:3000
+    ports:
+      - "4040:4040"
+    depends_on:
+      - app
