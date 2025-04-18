@@ -5,7 +5,9 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
 ## Features
 
 - API endpoint for generating content from PDF files
-- API key authentication
+- API key authentication with support for:
+  - Global API key for service-level access control
+  - Per-session custom Google API keys for individual Gemini access
 - PDF file upload and processing
 - Integration with Google's Gemini AI
 - Support for multiple Gemini models with automatic location mapping
@@ -61,7 +63,42 @@ A TypeScript/Node.js API service that processes PDF files using Google's Gemini 
 
 ### Authentication
 
-All endpoints require the `x-api-key` header with your API key.
+All endpoints require the `x-api-key` header with your service API key for access control.
+
+Additionally, you can provide a custom Google API key for Gemini access in the following endpoints:
+
+#### Generate Content
+```http
+POST /api/generate
+Content-Type: application/json
+x-api-key: your-service-api-key
+
+{
+  "filename": "previously-uploaded.pdf",
+  "prompt": "your prompt",
+  "apiKey": "your-custom-google-api-key"  // Optional: Custom Gemini API key
+}
+```
+
+#### Create Chat Session
+```http
+POST /api/chat/session
+Content-Type: application/json
+x-api-key: your-service-api-key
+
+{
+  "model": "gemini-2.0-flash-001",  // optional
+  "preprompt": "System instruction",  // optional
+  "apiKey": "your-custom-google-api-key"  // optional: Custom Gemini API key
+}
+```
+
+When a custom Google API key is provided:
+- It will be used exclusively for that session's Gemini API calls
+- The key is securely stored with the session
+- Sessions are isolated by IP address and session ID
+- The key persists throughout the session's lifetime
+- When no custom key is provided, the default GOOGLE_API_KEY from environment variables is used
 
 ### File Management
 
@@ -121,7 +158,7 @@ All endpoints require the `x-api-key` header with your API key.
 
 ### Generate Content
 
-Now supports two modes of operation:
+Supports two modes of operation with optional custom API key:
 
 1. Direct file upload:
 ```
@@ -131,6 +168,9 @@ x-api-key: your-api-key
 
 file: <pdf_file>
 prompt: "your prompt"
+preprompt: "optional system instruction"
+model: "optional model name"
+apiKey: "your-custom-google-api-key"  // Optional: Custom Gemini API key
 ```
 
 2. Using previously uploaded file:
@@ -141,9 +181,18 @@ x-api-key: your-api-key
 
 {
   "filename": "previously-uploaded.pdf",
-  "prompt": "your prompt"
+  "prompt": "your prompt",
+  "preprompt": "optional system instruction",
+  "model": "optional model name",
+  "apiKey": "your-custom-google-api-key"  // Optional: Custom Gemini API key
 }
 ```
+
+The generate endpoint allows:
+- One-time use of a custom Google API key for a single generation
+- Model selection for specific generation requirements
+- Optional preprompt/system instruction
+- Both direct file upload and reference to existing files
 
 ### List Models
 
@@ -157,6 +206,10 @@ x-api-key: your-api-key
 {
   "models": [
     {
+      "model": "gemini-2.5-flash-preview-04-17",
+      "location": "global"
+    },
+    {
       "model": "gemini-2.5-pro-preview-03-25",
       "location": "global"
     },
@@ -169,15 +222,11 @@ x-api-key: your-api-key
       "location": "global"
     },
     {
-      "model": "gemini-2.0-flash-thinking-exp-01-21",
-      "location": "global"
-    },
-    {
-      "model": "gemini-1.5-flash-002",
+      "model": "gemini-1.5-flash",
       "location": "asia-southeast1"
     },
     {
-      "model": "gemini-1.5-pro-002",
+      "model": "gemini-1.5-pro",
       "location": "global"
     }
   ]
@@ -197,7 +246,8 @@ x-api-key: your-api-key
 ```json
 {
   "model": "gemini-2.0-flash-001",  // optional
-  "preprompt": "System instruction"  // optional
+  "preprompt": "System instruction",  // optional
+  "apiKey": "your-custom-google-api-key"  // optional: Custom Gemini API key
 }
 ```
 
@@ -209,6 +259,11 @@ x-api-key: your-api-key
   "created": "2024-03-20T10:00:00Z"
 }
 ```
+
+Note: The API key handling differs between endpoints:
+- `/api/generate`: Accepts a custom API key for one-time use
+- `/api/chat/session`: Custom API key persists for the entire session
+- Chat messages automatically use the session's API key
 
 #### Get Chat Session
 
@@ -262,7 +317,7 @@ x-api-key: your-api-key
 
 ### Chat Messages
 
-Similarly supports both direct upload and referencing existing files:
+Similarly supports both direct upload and referencing existing files, with custom API key support:
 
 1. Direct file upload:
 ```
@@ -286,6 +341,26 @@ x-api-key: your-api-key
 }
 ```
 
+Note: When sending messages to a chat session, the system automatically uses:
+- The custom Google API key provided during session creation (if any)
+- The default GOOGLE_API_KEY if no custom key was provided
+
+This ensures consistent API key usage throughout the entire chat session lifecycle.
+
+## Configuration
+
+### CORS Settings
+The API supports Cross-Origin Resource Sharing (CORS) with the following default configuration:
+- All origins allowed (`*`)
+- Methods: GET, POST, PUT, DELETE, OPTIONS
+- Allowed headers: Content-Type, x-api-key, Authorization
+- Exposed headers: Content-Range, X-Content-Range
+
+To restrict CORS in production, modify the origin in your `.env`:
+```env
+CORS_ORIGIN=https://your-domain.com
+```
+
 ## Environment Variables
 
 ```env
@@ -294,10 +369,10 @@ PORT=3000
 NGROK_AUTHTOKEN=your_ngrok_authtoken
 
 # API authentication
-API_KEY=your_api_key
+API_KEY=your_service_api_key  # Required: For service access control
 
 # Google Gemini configuration
-GOOGLE_API_KEY=your_google_api_key
+GOOGLE_API_KEY=your_google_api_key  # Default Gemini API key
 GOOGLE_PROJECT_ID=your_google_project_id
 
 # Default model configuration
@@ -309,15 +384,20 @@ DEFAULT_PREPROMPT=your_default_system_instruction
 
 ## Available Models
 
+- `gemini-2.5-flash-preview-04-17` (Location: global)
 - `gemini-2.5-pro-preview-03-25` (Location: global)
 - `gemini-2.0-flash-001` (Location: global)
 - `gemini-2.0-flash-lite-001` (Location: global)
-- `gemini-2.0-flash-thinking-exp-01-21` (Location: global)
-- `gemini-1.5-flash-002` (Location: asia-southeast1)
-- `gemini-1.5-pro-002` (Location: global)
+- `gemini-1.5-flash` (Location: asia-southeast1)
+- `gemini-1.5-pro` (Location: global)
 
 ## License
 
 ISC
+
+
+
+
+
 
 

@@ -5,12 +5,12 @@
 
 // Define the model type
 export type GeminiModelType = 
+  | 'gemini-2.5-flash-preview-04-17'
   | 'gemini-2.5-pro-preview-03-25'
   | 'gemini-2.0-flash-001'
   | 'gemini-2.0-flash-lite-001'
-  | 'gemini-2.0-flash-thinking-exp-01-21'
-  | 'gemini-1.5-flash-002'
-  | 'gemini-1.5-pro-002'
+  | 'gemini-1.5-flash'
+  | 'gemini-1.5-pro'
 
 // Define the location type
 export type GeminiLocationType = 
@@ -25,12 +25,12 @@ export interface GeminiModelConfig {
 
 // Define the available models and their locations
 export const GEMINI_MODELS: Record<GeminiModelType, GeminiLocationType> = {
+  'gemini-2.5-flash-preview-04-17': 'global',
   'gemini-2.5-pro-preview-03-25': 'global',
-  'gemini-2.0-flash-thinking-exp-01-21': 'global',
   'gemini-2.0-flash-001': 'global',
   'gemini-2.0-flash-lite-001': 'global',
-  'gemini-1.5-flash-002': 'asia-southeast1',
-  'gemini-1.5-pro-002': 'global'
+  'gemini-1.5-flash': 'asia-southeast1',
+  'gemini-1.5-pro': 'global'
 };
 
 /**

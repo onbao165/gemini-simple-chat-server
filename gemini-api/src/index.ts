@@ -17,9 +17,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Configure middleware
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
+}));
 app.use(express.json());
 app.use(authenticate);
-app.use(cors());
 
 // Helper function to get client IP
 const getClientIp = (req: Request): string => {
@@ -97,7 +102,7 @@ app.delete('/api/files/:filename', (req: Request, res: Response) => {
   try {
     const { filename } = req.params;
     const filepath = path.join(__dirname, '../uploads', filename);
-    
+
     if (!fs.existsSync(filepath)) {
       res.status(404).json({ error: 'File not found' });
       return;
@@ -118,8 +123,8 @@ app.post('/api/files', upload.single('file'), (req: Request, res: Response) => {
       res.status(400).json({ error: 'No file uploaded' });
       return;
     }
-    
-    res.json({ 
+
+    res.json({
       filename: req.file.filename,
       path: req.file.path,
       size: req.file.size
@@ -130,7 +135,7 @@ app.post('/api/files', upload.single('file'), (req: Request, res: Response) => {
   }
 });
 
-// Body: { prompt: string, preprompt?: string, model?: string, filename?: string }
+// Body: { prompt: string, preprompt?: string, model?: string, filename?: string, apiKey?: string }
 // Files: { pdf: File } (required, max 10MB, PDF only)
 app.post('/api/generate', upload.single('pdf'), async (req: Request, res: Response) => {
   try {
@@ -139,7 +144,8 @@ app.post('/api/generate', upload.single('pdf'), async (req: Request, res: Respon
     const preprompt = req.body?.preprompt || "";
     const model = req.body?.model;
     const filename = req.body?.filename;
-    
+    const apiKey = req.body?.apiKey; // Optional user-provided API key
+
     let pdfPath: string | undefined;
 
     if (req.file) {
@@ -154,31 +160,32 @@ app.post('/api/generate', upload.single('pdf'), async (req: Request, res: Respon
       res.status(400).json({ error: 'Either file upload or filename is required' });
       return;
     }
-    
+
     if (!prompt) {
       res.status(400).json({ error: 'Prompt is required' });
       return;
     }
-    
+
     if (model && !isValidModel(model)) {
-      res.status(400).json({ 
-        error: `Invalid model: ${model}. Available models: ${getAllModelConfigs().map(m => m.model).join(', ')}` 
+      res.status(400).json({
+        error: `Invalid model: ${model}. Available models: ${getAllModelConfigs().map(m => m.model).join(', ')}`
       });
       return;
     }
-    
+
     const result = await generateContent({
       pdfPath,
       prompt,
       preprompt,
-      modelType: model
+      modelType: model,
+      apiKey // Pass the user-provided API key if available
     });
-    
+
     // Only delete the file if it was uploaded in this request
     if (req.file) {
       fs.unlinkSync(pdfPath);
     }
-    
+
     res.json({ result });
   } catch (error: any) {
     console.error('Error generating content:', error);
@@ -187,14 +194,14 @@ app.post('/api/generate', upload.single('pdf'), async (req: Request, res: Respon
 });
 
 // Chat endpoints
-// Body: { model?: string }
+// Body: { model?: string, apiKey?: string, preprompt?: string }
 // Default model will be used from process.env.DEFAULT_GEMINI_MODEL if not specified
 app.post('/api/chat/session', async (req: Request, res: Response) => {
   try {
-    const { model = process.env.DEFAULT_GEMINI_MODEL, preprompt="" } = req.body || {};
+    const { model = process.env.DEFAULT_GEMINI_MODEL, preprompt="", apiKey } = req.body || {};
     const ip = getClientIp(req);
-    const chatManager = ChatManager.getInstance();
-    const sessionData = await chatManager.createSession(ip, preprompt, model);
+    const chatManager = ChatManager.getInstance(apiKey);
+    const sessionData = await chatManager.createSession(ip, preprompt, model, apiKey);
     res.json(sessionData);
   } catch (error) {
     console.error('Error creating chat session:', error);
@@ -211,17 +218,22 @@ app.post('/api/chat/:sessionId/message', upload.single('pdf'), async (req: Reque
     const message = req.body?.message;
     const filename = req.body?.filename;
     const ip = getClientIp(req);
-    
+
     let pdfPath: string | undefined;
-    
+    let isUploadedFile = false;
+
     if (req.file) {
+      // This is a newly uploaded file
       pdfPath = req.file.path;
+      isUploadedFile = true;
     } else if (filename) {
+      // This is an existing file referenced by filename
       pdfPath = path.join(__dirname, '../uploads', filename);
       if (!fs.existsSync(pdfPath)) {
         res.status(404).json({ error: 'File not found' });
         return;
       }
+      isUploadedFile = false; // Don't delete existing files
     }
 
     if (!message) {
@@ -230,16 +242,29 @@ app.post('/api/chat/:sessionId/message', upload.single('pdf'), async (req: Reque
     }
 
     const chatManager = ChatManager.getInstance();
-    const result = await chatManager.sendMessage(sessionId, ip, message, pdfPath);
-    
+    const result = await chatManager.sendMessage(sessionId, ip, message, pdfPath, isUploadedFile);
+
     // Only delete the file if it was uploaded in this request
-    if (req.file && pdfPath) {
-      fs.unlinkSync(pdfPath);
+    if (pdfPath && isUploadedFile) {
+      try {
+        fs.unlinkSync(pdfPath);
+      } catch (error) {
+        console.warn('Warning: Could not delete uploaded file:', error);
+      }
     }
-    
+
     res.json(result);
   } catch (error: any) {
     console.error('Error sending message:', error);
+    // Clean up uploaded file in case of error
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (deleteError) {
+        console.warn('Warning: Could not delete uploaded file during error handling:', deleteError);
+      }
+    }
+    
     if (error.message === 'Chat session not found') {
       res.status(404).json({ error: error.message });
     } else if (error.message === 'IP address mismatch' || error.message === 'Session expired') {
@@ -258,12 +283,12 @@ app.get('/api/chat/:sessionId', async (req: Request, res: Response) => {
     const ip = getClientIp(req);
     const chatManager = ChatManager.getInstance();
     const sessionData = chatManager.getSession(sessionId, ip);
-    
+
     if (!sessionData) {
       res.status(404).json({ error: 'Chat session not found' });
       return;
     }
-    
+
     res.json(sessionData);
   } catch (error) {
     console.error('Error getting chat session:', error);
@@ -289,12 +314,12 @@ app.delete('/api/chat/:sessionId', async (req: Request, res: Response) => {
     const ip = getClientIp(req);
     const chatManager = ChatManager.getInstance();
     const deleted = chatManager.deleteSession(sessionId, ip);
-    
+
     if (!deleted) {
       res.status(404).json({ error: 'Chat session not found' });
       return;
     }
-    
+
     res.json({ message: 'Chat session deleted successfully' });
   } catch (error) {
     console.error('Error deleting chat session:', error);
@@ -318,5 +343,7 @@ app.delete('/api/chat', async (req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+
 
 

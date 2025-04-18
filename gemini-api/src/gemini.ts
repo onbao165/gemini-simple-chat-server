@@ -10,6 +10,7 @@ export interface GenerateContentParams {
   prompt: string;
   preprompt?: string;
   modelType?: string;
+  apiKey?: string; // Optional user-provided API key
 }
 
 /**
@@ -18,16 +19,16 @@ export interface GenerateContentParams {
  * @returns Generated content as a string
  */
 export async function generateContent(params: GenerateContentParams): Promise<string> {
-  const { pdfPath, prompt, preprompt = "", modelType } = params;
-  
+  const { pdfPath, prompt, preprompt = "", modelType, apiKey } = params;
+
   try {
     // Determine which model to use
-    const modelToUse = modelType && isValidModel(modelType) 
+    const modelToUse = modelType && isValidModel(modelType)
       ? modelType as GeminiModelType
       : getDefaultModelConfig().model;
-    
-    // Initialize the Google Generative AI client
-    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY as string);
+
+    // Initialize the Google Generative AI client with user API key or default from env
+    const genAI = new GoogleGenerativeAI(apiKey || process.env.GOOGLE_API_KEY as string);
 
 
     // Get the model

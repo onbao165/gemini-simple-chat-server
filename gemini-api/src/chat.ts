@@ -1,5 +1,5 @@
-import { GoogleGenerativeAI, ChatSession, Content, Part, HarmCategory, HarmBlockThreshold, Tool } from '@google/generative-ai';
-import { getModelLocation, isValidModel, getDefaultModelConfig, GeminiModelType } from './config/models';
+import { GoogleGenerativeAI, ChatSession, Content, Part, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import { isValidModel, getDefaultModelConfig, GeminiModelType } from './config/models';
 import fs from 'fs';
 
 export interface ChatSessionData {
@@ -25,13 +25,15 @@ export interface MessageResponse {
 
 export class ChatManager {
   private static instance: ChatManager;
-  private sessions: Map<string, { session: ChatSession; data: ChatSessionData; model: any }>;
+  private sessions: Map<string, { session: ChatSession; data: ChatSessionData; model: any; apiKey?: string }>;
   private genAI: GoogleGenerativeAI;
   private readonly SESSION_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
+  private defaultApiKey: string;
 
-  private constructor() {
+  private constructor(apiKey?: string) {
     this.sessions = new Map();
-    this.genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY as string);
+    this.defaultApiKey = process.env.GOOGLE_API_KEY as string;
+    this.genAI = new GoogleGenerativeAI(apiKey || this.defaultApiKey);
     // Start cleanup interval
     this.startCleanupInterval();
   }
@@ -50,24 +52,32 @@ export class ChatManager {
     }
   }
 
-  public static getInstance(): ChatManager {
+  public static getInstance(apiKey?: string): ChatManager {
     if (!ChatManager.instance) {
-      ChatManager.instance = new ChatManager();
+      ChatManager.instance = new ChatManager(apiKey);
+    } else if (apiKey) {
+      // If an API key is provided and the instance already exists,
+      // we'll still use the existing instance but update the genAI client
+      // for any new sessions created with this API key
+      ChatManager.instance.genAI = new GoogleGenerativeAI(apiKey);
     }
     return ChatManager.instance;
   }
 
-  public async createSession(ip: string, preprompt?: string, modelType?: string): Promise<ChatSessionData> {
+  public async createSession(ip: string, preprompt?: string, modelType?: string, apiKey?: string): Promise<ChatSessionData> {
     // Clean up any existing sessions for this IP
     this.cleanupSessionsByIp(ip);
 
     // Determine which model to use
-    const modelToUse = modelType && isValidModel(modelType) 
+    const modelToUse = modelType && isValidModel(modelType)
       ? modelType as GeminiModelType
       : getDefaultModelConfig().model;
 
+    // If a custom API key is provided for this session, create a new genAI instance
+    const genAIClient = apiKey ? new GoogleGenerativeAI(apiKey) : this.genAI;
+
     // Get the model
-    const model = this.genAI.getGenerativeModel({
+    const model = genAIClient.getGenerativeModel({
       model: modelToUse
     });
 
@@ -98,6 +108,11 @@ export class ChatManager {
       topP: 0.95,
     };
 
+    const systemInstructionConfig: Content = {
+      role: 'system',
+      parts: [{ text: preprompt || process.env.DEFAULT_PREPROMPT || '' }],
+    }
+
     // Add tools
     // Search Grounding is supported only for text-only requests.
     // const tools = [
@@ -108,7 +123,8 @@ export class ChatManager {
     const chatSession = model.startChat({
       generationConfig,
       safetySettings,
-      systemInstruction: preprompt || process.env.DEFAULT_PREPROMPT || '',
+      systemInstruction: systemInstructionConfig,
+
       // tools,
     });
 
@@ -126,8 +142,8 @@ export class ChatManager {
       totalTokens: 0
     };
 
-    // Store session
-    this.sessions.set(sessionId, { session: chatSession, data: sessionData, model });
+    // Store session with the API key if provided
+    this.sessions.set(sessionId, { session: chatSession, data: sessionData, model, apiKey });
 
     return sessionData;
   }
@@ -140,7 +156,7 @@ export class ChatManager {
     }
   }
 
-  public async sendMessage(sessionId: string, ip: string, message: string, pdfPath?: string): Promise<MessageResponse> {
+  public async sendMessage(sessionId: string, ip: string, message: string, pdfPath?: string, isUploadedFile: boolean = false): Promise<MessageResponse> {
     const sessionData = this.sessions.get(sessionId);
     if (!sessionData) {
       throw new Error('Chat session not found');
@@ -198,22 +214,33 @@ export class ChatManager {
     const totalTokens = promptTokens + responseTokens;
     sessionData.data.totalTokens += totalTokens;
 
-    // Update history
+    // Update history and filter out inline data
     const history = await sessionData.session.getHistory();
-    sessionData.data.history = history;
+    const filteredHistory: Content[] = history.map(content => ({
+      role: content.role,
+      parts: content.parts.map(part => {
+        if ('text' in part) {
+          return { text: part.text } as Part;
+        }
+        if ('inlineData' in part) {
+          return { text: '[PDF Document]' } as Part;
+        }
+        return { text: '[Unknown Content]' } as Part;
+      })
+    }));
 
-    // Clean up PDF file if it was provided
-    if (pdfPath) {
-      try {
-        fs.unlinkSync(pdfPath);
-      } catch (error) {
-        console.error('Error deleting PDF file:', error);
-      }
-    }
+    // Update session data with filtered history
+    sessionData.data.history = filteredHistory;
+
+    // Create filtered session data for response
+    const filteredSessionData: ChatSessionData = {
+      ...sessionData.data,
+      history: filteredHistory
+    };
 
     return {
       response,
-      sessionData: sessionData.data,
+      sessionData: filteredSessionData,
       tokenCount: {
         promptTokens,
         responseTokens,
@@ -254,4 +281,4 @@ export class ChatManager {
     }
     return deletedCount;
   }
-} 
+}
