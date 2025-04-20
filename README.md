@@ -1,6 +1,6 @@
 # Gemini API Service
 
-A TypeScript/Node.js API service that processes PDF files using Google's Gemini AI models, similar to the functionality in `gemini-chat.py`.
+A TypeScript/Node.js API service that processes PDF files using Google's Gemini AI models.
 
 ## Features
 
